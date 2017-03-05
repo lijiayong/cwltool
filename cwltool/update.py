@@ -7,24 +7,24 @@ import urlparse
 import schema_salad.validate
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from schema_salad.ref_resolver import Loader
-from typing import Any, Callable, Dict, Text, Tuple, Union  # pylint: disable=unused-import
+from typing import Any, Callable, Dict, Optional, Text, Tuple, Union  # pylint: disable=unused-import
 
 from .utils import aslist
 
 
-def findId(doc, frg):  # type: (Any, Any) -> Dict
+def findId(doc, frg):  # type: (Any, Any) -> Optional[Dict]
     if isinstance(doc, dict):
         if "id" in doc and doc["id"] == frg:
             return doc
         else:
             for d in doc:
                 f = findId(doc[d], frg)
-                if f:
+                if f is not None:
                     return f
-    if isinstance(doc, list):
+    elif isinstance(doc, list):
         for d in doc:
             f = findId(d, frg)
-            if f:
+            if f is not None:
                 return f
     return None
 
@@ -50,7 +50,7 @@ def _draft2toDraft3dev1(doc, loader, baseuri, update_steps=True):
             if "import" in doc:
                 imp = urlparse.urljoin(baseuri, doc["import"])
                 impLoaded = loader.fetch(imp)
-                r = None  # type: Dict[Text, Any]
+                r = None  # type: Optional[Dict[Text, Any]]
                 if isinstance(impLoaded, list):
                     r = {"@graph": impLoaded}
                 elif isinstance(impLoaded, dict):
@@ -59,7 +59,7 @@ def _draft2toDraft3dev1(doc, loader, baseuri, update_steps=True):
                     raise Exception("Unexpected code path.")
                 r["id"] = imp
                 _, frag = urlparse.urldefrag(imp)
-                if frag:
+                if frag is not None:
                     frag = "#" + frag
                     r = findId(r, frag)
                 return _draft2toDraft3dev1(r, loader, imp)
@@ -126,7 +126,7 @@ def _updateDev2Script(ent):  # type: (Any) -> Any
                 if not sp[0]:
                     sp.pop(0)
                 front = sp.pop(0)
-                sp = [Text(i) if digits.match(i) else "'" + i + "'"
+                sp = [Text(i) if digits.match(i) is not None else "'" + i + "'"
                       for i in sp]
                 if front == "job":
                     return u"$(inputs[%s])" % ']['.join(sp)
@@ -205,7 +205,7 @@ def _draftDraft3dev2toDev3(doc, loader, baseuri):
                 else:
                     imp = urlparse.urljoin(baseuri, doc["@import"])
                     impLoaded = loader.fetch(imp)
-                    r = {}  # type: Dict[Text, Any]
+                    r = {}  # type: Optional[Dict[Text, Any]]
                     if isinstance(impLoaded, list):
                         r = {"@graph": impLoaded}
                     elif isinstance(impLoaded, dict):
@@ -214,7 +214,7 @@ def _draftDraft3dev2toDev3(doc, loader, baseuri):
                         raise Exception("Unexpected code path.")
                     r["id"] = imp
                     frag = urlparse.urldefrag(imp)[1]
-                    if frag:
+                    if frag is not None:
                         frag = "#" + frag
                         r = findId(r, frag)
                     return _draftDraft3dev2toDev3(r, loader, imp)
@@ -253,7 +253,7 @@ def traverseImport(doc, loader, baseuri, func):
         else:
             imp = urlparse.urljoin(baseuri, doc["$import"])
             impLoaded = loader.fetch(imp)
-            r = {}  # type: Dict[Text, Any]
+            r = {}  # type: Optional[Dict[Text, Any]]
             if isinstance(impLoaded, list):
                 r = {"$graph": impLoaded}
             elif isinstance(impLoaded, dict):
@@ -262,7 +262,7 @@ def traverseImport(doc, loader, baseuri, func):
                 raise Exception("Unexpected code path.")
             r["id"] = imp
             _, frag = urlparse.urldefrag(imp)
-            if frag:
+            if frag is not None:
                 frag = "#" + frag
                 r = findId(r, frag)
             return func(r, loader, imp)
@@ -476,7 +476,7 @@ UPDATES = {
     "draft-2": draft2toDraft3dev1,
     "draft-3": draft3toDraft4dev1,
     "v1.0": None
-}  # type: Dict[Text, Callable[[Any, Loader, Text], Tuple[Any, Text]]]
+}  # type: Dict[Text, Optional[Callable[[Any, Loader, Text], Tuple[Any, Text]]]]
 
 DEVUPDATES = {
     "draft-3.dev1": draftDraft3dev1toDev2,
@@ -490,7 +490,7 @@ DEVUPDATES = {
     "v1.0.dev4": v1_0dev4to1_0,
     "v1.0": v1_0to1_1_0dev1,
     "v1.1.0-dev1": None
-}  # type: Dict[Text, Callable[[Any, Loader, Text], Tuple[Any, Text]]]
+}  # type: Dict[Text, Optional[Callable[[Any, Loader, Text], Tuple[Any, Text]]]]
 
 ALLUPDATES = UPDATES.copy()
 ALLUPDATES.update(DEVUPDATES)
@@ -511,7 +511,6 @@ def checkversion(doc, metadata, enable_dev):
     Returns the document and the validated version string.
     """
 
-    cdoc = None  # type: CommentedMap
     if isinstance(doc, CommentedSeq):
         lc = metadata.lc
         metadata = copy.copy(metadata)
@@ -549,9 +548,9 @@ def update(doc, loader, baseuri, enable_dev, metadata):
 
     (cdoc, version) = checkversion(doc, metadata, enable_dev)
 
-    nextupdate = identity  # type: Callable[[Any, Loader, Text], Tuple[Any, Text]]
+    nextupdate = identity  # type: Optional[Callable[[Any, Loader, Text], Tuple[Any, Text]]]
 
-    while nextupdate:
+    while nextupdate is not None:
         (cdoc, version) = nextupdate(cdoc, loader, baseuri)
         nextupdate = ALLUPDATES[version]
 

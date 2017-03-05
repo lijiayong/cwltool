@@ -15,8 +15,8 @@ import ruamel.yaml as yaml
 import schema_salad.validate as validate
 from schema_salad.ref_resolver import Loader, Fetcher, file_uri, uri_file_path
 from schema_salad.sourceline import strip_dup_lineno
-from typing import (Union, Any, AnyStr, cast, Callable, Dict, Sequence, Text,
-                    Tuple, IO)
+from typing import (cast, Any, AnyStr, Callable, Dict, IO, List,
+        MutableMapping, Optional, Sequence, Text, Tuple, Union)
 
 from . import draft2tool
 from . import workflow
@@ -192,11 +192,11 @@ def single_job_executor(t,  # type: Process
                         job_order_object,  # type: Dict[Text, Any]
                         **kwargs  # type: Any
                         ):
-    # type: (...) -> Tuple[Dict[Text, Any], Text]
-    final_output = []
+    # type: (...) -> Tuple[Union[Dict[Text, Any], List[Dict[Text, Any]], None], Text]
+    final_output = []  # type: List[Any]
     final_status = []
 
-    def output_callback(out, processStatus):
+    def output_callback(out, processStatus):  # type: (Text, Text) -> None
         final_status.append(processStatus)
         final_output.append(out)
 
@@ -238,14 +238,14 @@ def single_job_executor(t,  # type: Process
         raise WorkflowException(Text(e))
 
     if final_output and final_output[0] and finaloutdir:
-        final_output[0] = relocateOutputs(final_output[0], finaloutdir,
-                                          output_dirs, kwargs.get("move_outputs"),
-                                          kwargs["make_fs_access"](""))
+        final_output[0] = relocateOutputs(
+            final_output[0], finaloutdir, output_dirs,
+            kwargs.get("move_outputs"), kwargs["make_fs_access"](""))
 
     if kwargs.get("rm_tmpdir"):
         cleanIntermediate(output_dirs)
 
-    if final_output and final_status:
+    if final_output is not None and final_status is not None:
         return (final_output[0], final_status[0])
     else:
         return (None, "permanentFail")
@@ -327,7 +327,7 @@ def add_argument(toolparser, name, inptype, records, description="",
                 return None
 
     ahelp = description.replace("%", "%%")
-    action = None  # type: Union[argparse.Action, Text]
+    action = None  # type: Optional[Union[argparse.Action, Text]]
     atype = None  # type: Any
 
     if inptype == "File":
@@ -435,7 +435,7 @@ def load_job_order(args, t, stdin, print_input_deps=False, relative_deps=False,
         records = []  # type: List[Text]
         toolparser = generate_parser(
             argparse.ArgumentParser(prog=args.workflow), t, namemap, records)
-        if toolparser:
+        if toolparser is not None:
             if args.tool_help:
                 toolparser.print_help()
                 return 0
@@ -487,7 +487,7 @@ def load_job_order(args, t, stdin, print_input_deps=False, relative_deps=False,
                   basedir=file_uri(input_basedir + "/"))
         return 0
 
-    def pathToLoc(p):
+    def pathToLoc(p):  # type: (Dict[Text, Any]) -> None
         if "location" not in p and "path" in p:
             p["location"] = p["path"]
             del p["path"]
@@ -505,7 +505,7 @@ def load_job_order(args, t, stdin, print_input_deps=False, relative_deps=False,
     return (job_order_object, input_basedir)
 
 
-def makeRelative(base, ob):
+def makeRelative(base, ob):  # type: (Text, MutableMapping[Text, Any]) -> None
     u = ob.get("location", ob.get("path"))
     if ":" in u.split("/")[0] and not u.startswith("file://"):
         pass
@@ -520,18 +520,19 @@ def printdeps(obj, document_loader, stdout, relative_deps, uri, basedir=None):
     deps = {"class": "File",
             "location": uri}  # type: Dict[Text, Any]
 
-    def loadref(b, u):
+    def loadref(b, u):  # type: (Text, Text) -> Any
         return document_loader.fetch(document_loader.fetcher.urljoin(b, u))
 
     sf = scandeps(
-        basedir if basedir else uri, obj, {"$import", "run"},
+        basedir if basedir is not None else uri, obj, {"$import", "run"},
         {"$include", "$schemas", "location"}, loadref)
-    if sf:
+    if sf is not None:
         deps["secondaryFiles"] = sf
 
     if relative_deps:
         if relative_deps == "primary":
-            base = basedir if basedir else os.path.dirname(uri_file_path(str(uri)))
+            base = basedir if basedir is not None else os.path.dirname(
+                uri_file_path(str(uri)))
         elif relative_deps == "cwd":
             base = os.getcwd()
         else:
@@ -563,7 +564,7 @@ def versionstring():
 
 def main(argsl=None,  # type: List[str]
          args=None,  # type: argparse.Namespace
-         executor=single_job_executor,  # type: Callable[..., Tuple[Dict[Text, Any], Text]]
+         executor=single_job_executor,  # type: Callable[..., Tuple[Union[Dict[Text, Any], List[Dict[Text, Any]], None], Text]]
          makeTool=workflow.defaultMakeTool,  # type: Callable[..., Process]
          selectResources=None,  # type: Callable[[Dict[Text, int]], Dict[Text, int]]
          stdin=sys.stdin,  # type: IO[Any]
@@ -748,7 +749,7 @@ def main(argsl=None,  # type: List[str]
             # This is the workflow output, it needs to be written
             if out is not None:
 
-                def locToPath(p):
+                def locToPath(p):  # type: (Dict[Text, Any]) -> None
                     if p["location"].startswith("file://"):
                         p["path"] = uri_file_path(p["location"])
 

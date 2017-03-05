@@ -1,7 +1,7 @@
 from rdflib import Graph
 from schema_salad.jsonld_context import makerdf
 from schema_salad.ref_resolver import ContextType
-from typing import Any, Dict, IO, Text
+from typing import cast, Any, Dict, IO, Text
 from six.moves import urllib
 
 from .process import Process
@@ -10,7 +10,7 @@ from .process import Process
 def gather(tool, ctx):  # type: (Process, ContextType) -> Graph
     g = Graph()
 
-    def visitor(t):
+    def visitor(t):  # type: (Dict[Text, Any]) -> None
         makerdf(t["id"], t, ctx, graph=g)
 
     tool.visit(visitor)
@@ -19,15 +19,15 @@ def gather(tool, ctx):  # type: (Process, ContextType) -> Graph
 
 def printrdf(wf, ctx, sr, stdout):
     # type: (Process, ContextType, Text, IO[Any]) -> None
-    stdout.write(gather(wf, ctx).serialize(format=sr))
+    stdout.write(cast(Text, gather(wf, ctx).serialize(format=sr)))
 
 
 def lastpart(uri):  # type: (Any) -> Text
-    uri = Text(uri)
-    if "/" in uri:
-        return uri[uri.rindex("/") + 1:]
+    uriT = Text(uri)
+    if "/" in uriT:
+        return uriT[uri.rindex("/") + 1:]
     else:
-        return uri
+        return uriT
 
 
 def dot_with_parameters(g, stdout):  # type: (Graph, IO[Any]) -> None

@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 import requests
-from typing import Text
+from typing import Dict, List, Optional, Text
 
 from .errors import WorkflowException
 
@@ -86,8 +86,8 @@ def get_image(dockerRequirement, pull_image, dry_run=False):
 
 
 def get_from_requirements(r, req, pull_image, dry_run=False):
-    # type: (Dict[Text, Text], bool, bool, bool) -> Text
-    if r:
+    # type: (Dict[Text, Text], bool, bool, bool) -> Optional[Text]
+    if r is not None:
         errmsg = None
         try:
             subprocess.check_output(["docker", "version"])
@@ -96,7 +96,7 @@ def get_from_requirements(r, req, pull_image, dry_run=False):
         except OSError as e:
             errmsg = "'docker' executable not found: " + Text(e)
 
-        if errmsg:
+        if errmsg is not None:
             if req:
                 raise WorkflowException(errmsg)
             else:

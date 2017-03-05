@@ -1,7 +1,7 @@
 import copy
 
 from schema_salad.ref_resolver import Loader
-from typing import Union, Any, cast, Callable, Dict, Text
+from typing import cast, Any, Callable, Dict, List, Optional, Set, Text, Union
 from six.moves import urllib
 
 from .process import shortname, uniquename
@@ -20,7 +20,10 @@ def flatten_deps(d, files):  # type: (Any, Set[Text]) -> None
             flatten_deps(d["listing"], files)
 
 
-def find_run(d, loadref, runs):  # type: (Any, Callable[[Text, Text], Union[Dict, List, Text]], Set[Text]) -> None
+def find_run(d,        # type: Any
+             loadref,  # Callable[[[Optional[Text]], Text], Union[Dict, List, Text]]
+             runs      # type: Set[Text]
+             ):  # type: (...) -> None
     if isinstance(d, list):
         for s in d:
             find_run(s, loadref, runs)
@@ -69,7 +72,7 @@ def replace_refs(d, rewrite, stem, newstem):
 def pack(document_loader, processobj, uri, metadata):
     # type: (Loader, Union[Dict[Text, Any], List[Dict[Text, Any]]], Text, Dict[Text, Text]) -> Dict[Text, Any]
     def loadref(b, u):
-        # type: (Text, Text) -> Union[Dict, List, Text]
+        # type: (Optional[Text], Text) -> Union[Dict, List, Text]
         return document_loader.resolve_ref(u, base_url=b)[0]
 
     runs = {uri}
@@ -126,7 +129,7 @@ def pack(document_loader, processobj, uri, metadata):
                 del dc[n]
         packed["$graph"].append(dc)
 
-    if schemas:
+    if schemas is not None:
         packed["$schemas"] = list(schemas)
 
     for r in rewrite:

@@ -3,7 +3,7 @@ import copy
 import avro
 import schema_salad.validate as validate
 from schema_salad.sourceline import SourceLine
-from typing import Any, Callable, Text, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Text, Type, Union
 from six import string_types, iteritems
 
 from . import expression
@@ -23,23 +23,35 @@ def substitute(value, replace):  # type: (Text, Text) -> Text
 
 
 class Builder(object):
-    def __init__(self):  # type: () -> None
-        self.names = None  # type: avro.schema.Names
-        self.schemaDefs = None  # type: Dict[Text, Dict[Text, Any]]
-        self.files = None  # type: List[Dict[Text, Text]]
-        self.fs_access = None  # type: StdFsAccess
-        self.job = None  # type: Dict[Text, Union[Dict[Text, Any], List, Text]]
-        self.requirements = None  # type: List[Dict[Text, Any]]
-        self.hints = None  # type: List[Dict[Text, Any]]
-        self.outdir = None  # type: Text
-        self.tmpdir = None  # type: Text
-        self.resources = None  # type: Dict[Text, Union[int, Text]]
+    def __init__(self,
+                 names,           # type: avro.schema.Names
+                 schemaDefs,      # type: Dict[Text, Dict[Text, Any]]
+                 files,           # type: List[Dict[Text, Text]]
+                 make_fs_access,  # type: Type[StdFsAccess]
+                 fs_access,       # type: StdFsAccess
+                 job,             # type: Dict[Text, Union[Dict[Text, Any], List, Text]]
+                 requirements,    # type: List[Dict[Text, Any]]
+                 outdir,          # type: Text
+                 tmpdir,          # type: Text
+                 stagedir,        # type: Text
+                 resources        # type: Dict[Text, Union[int, Text]]
+                 ):  # type: (...) -> None
+        self.names = names
+        self.schemaDefs = schemaDefs
+        self.files = files
+        self.make_fs_access = make_fs_access
+        self.fs_access = fs_access
+        self.job = job
+        self.requirements = requirements
+        self.outdir = outdir
+        self.tmpdir = tmpdir
+        self.stagedir = stagedir
+        self.resources = resources
+        self.hints = None  # type: Optional[List[Dict[Text, Any]]]
         self.bindings = []  # type: List[Dict[Text, Any]]
-        self.timeout = None  # type: int
-        self.pathmapper = None  # type: PathMapper
-        self.stagedir = None  # type: Text
-        self.make_fs_access = None  # type: Type[StdFsAccess]
-        self.build_job_script = None  # type: Callable[[List[str]], Text]
+        self.timeout = None  # type: Optional[int]
+        self.pathmapper = None  # type: Optional[PathMapper]
+        self.build_job_script = None  # type: Optional[Callable[[List[str]], Text]]
         self.debug = False  # type: bool
 
         # One of None, "shallow", "deep"
@@ -53,7 +65,7 @@ class Builder(object):
         if lead_pos is None:
             lead_pos = []
         bindings = []  # type: List[Dict[Text,Text]]
-        binding = None  # type: Dict[Text,Any]
+        binding = None  # type: Optional[Dict[Text,Any]]
         if "inputBinding" in schema and isinstance(schema["inputBinding"], dict):
             binding = copy.copy(schema["inputBinding"])
 
@@ -100,7 +112,7 @@ class Builder(object):
             if schema["type"] == "array":
                 for n, item in enumerate(datum):
                     b2 = None
-                    if binding:
+                    if binding is not None:
                         b2 = copy.deepcopy(binding)
                         b2["datum"] = item
                     itemschema = {
@@ -116,7 +128,7 @@ class Builder(object):
 
             if schema["type"] == "File":
                 self.files.append(datum)
-                if binding:
+                if binding is not None:
                     if binding.get("loadContents"):
                         with self.fs_access.open(datum["location"], "rb") as f:
                             datum["contents"] = f.read(CONTENT_LIMIT)
@@ -140,7 +152,8 @@ class Builder(object):
                             datum["secondaryFiles"].append(sfpath)
                     normalizeFilesDirs(datum["secondaryFiles"])
 
-                def _capture_files(f):
+                def _capture_files(f  # type: Dict[Text, Text]
+                                   ):  # type: (...) -> Dict[Text, Text]
                     self.files.append(f)
                     return f
 
@@ -153,7 +166,7 @@ class Builder(object):
                 self.files.append(datum)
 
         # Position to front of the sort key
-        if binding:
+        if binding is not None:
             for bi in bindings:
                 bi["position"] = binding["position"] + bi["position"]
             bindings.append(binding)
@@ -164,7 +177,7 @@ class Builder(object):
         if isinstance(value, dict) and value.get("class") in ("File", "Directory"):
             if "path" not in value:
                 raise WorkflowException(u"%s object missing \"path\": %s" % (value["class"], value))
-            return value["path"]
+            return Text(value["path"])
         else:
             return Text(value)
 

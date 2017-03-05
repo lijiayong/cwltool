@@ -23,8 +23,8 @@ from rdflib.namespace import RDFS, OWL
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from schema_salad.ref_resolver import Loader, file_uri
 from schema_salad.sourceline import SourceLine
-from typing import (Any, AnyStr, Callable, cast, Dict, List, Generator, Text,
-                    Tuple, Union)
+from typing import (cast, Any, AnyStr, Callable, cast, Dict, List, Generator,
+        Optional, Set, Text, Tuple, Union)
 
 from .builder import Builder, adjustFileObjs
 from .pathmapper import adjustDirObjs, get_listing
@@ -81,9 +81,9 @@ salad_files = ('metaschema.yml',
                'vocab_res_proc.yml')
 
 SCHEMA_CACHE = {}  # type: Dict[Text, Tuple[Loader, Union[avro.schema.Names, avro.schema.SchemaParseException], Dict[Text, Any], Loader]]
-SCHEMA_FILE = None  # type: Dict[Text, Any]
-SCHEMA_DIR = None  # type: Dict[Text, Any]
-SCHEMA_ANY = None  # type: Dict[Text, Any]
+SCHEMA_FILE = None  # type: Optional[Dict[Text, Any]]
+SCHEMA_DIR = None  # type: Optional[Dict[Text, Any]]
+SCHEMA_ANY = None  # type: Optional[Dict[Text, Any]]
 
 custom_schemas = {}  # type: Dict[Text, Tuple[Text, Text]]
 
@@ -143,7 +143,7 @@ def get_schema(version):
 def shortname(inputid):
     # type: (Text) -> Text
     d = urlparse.urlparse(inputid)
-    if d.fragment:
+    if d.fragment is not None:
         return d.fragment.split(u"/")[-1]
     else:
         return d.path.split(u"/")[-1]
@@ -162,24 +162,6 @@ def checkRequirements(rec, supportedProcessRequirements):
     if isinstance(rec, list):
         for d in rec:
             checkRequirements(d, supportedProcessRequirements)
-
-
-def adjustFilesWithSecondary(rec, op, primary=None):
-    """Apply a mapping function to each File path in the object `rec`, propagating
-    the primary file associated with a group of secondary files.
-    """
-
-    if isinstance(rec, dict):
-        if rec.get("class") == "File":
-            rec["path"] = op(rec["path"], primary=primary)
-            adjustFilesWithSecondary(rec.get("secondaryFiles", []), op,
-                                     primary if primary else rec["path"])
-        else:
-            for d in rec:
-                adjustFilesWithSecondary(rec[d], op)
-    if isinstance(rec, list):
-        for d in rec:
-            adjustFilesWithSecondary(d, op, primary)
 
 
 def stageFiles(pm, stageFunc, ignoreWritable=False):
@@ -218,15 +200,20 @@ def collectFilesAndDirs(obj, out):
             collectFilesAndDirs(l, out)
 
 
-def relocateOutputs(outputObj, outdir, output_dirs, action, fs_access):
-    # type: (Union[Dict[Text, Any], List[Dict[Text, Any]]], Text, Set[Text], Text, StdFsAccess) -> Union[Dict[Text, Any], List[Dict[Text, Any]]]
+def relocateOutputs(outputObj,    # type: Union[Dict[Text, Any], List[Dict[Text, Any]]]
+                    outdir,       # type: Text
+                    output_dirs,  # type: Set[Text]
+                    action,       # Text
+                    fs_access     # StdfsAccess
+                    ):
+    # type: (...) -> Union[Dict[Text, Any], List[Dict[Text, Any]]]
 
     adjustDirObjs(outputObj, functools.partial(get_listing, fs_access, recursive=True))
 
     if action not in ("move", "copy"):
         return outputObj
 
-    def moveIt(src, dst):
+    def moveIt(src, dst):  # type: (Text, Text) -> None
         if action == "move":
             for a in output_dirs:
                 if src.startswith(a):
@@ -241,8 +228,9 @@ def relocateOutputs(outputObj, outdir, output_dirs, action, fs_access):
     pm = PathMapper(outfiles, "", outdir, separateDirs=False)
     stageFiles(pm, moveIt)
 
-    def _check_adjust(f):
-        f["location"] = file_uri(pm.mapper(f["location"])[1])
+    def _check_adjust(f  # type: Dict[Text, Union[Text, int]]
+                     ):  # type: (...) -> Dict[Text, Union[Text, int]]
+        f["location"] = file_uri(pm.mapper(Text(f["location"]))[1])
         if "contents" in f:
             del f["contents"]
         if f["class"] == "File":
@@ -359,10 +347,10 @@ class Process(object):
         """
 
         self.metadata = kwargs.get("metadata", {})  # type: Dict[Text,Any]
-        self.names = None  # type: avro.schema.Names
+        #self.names = None  # type: avro.schema.Names
 
         global SCHEMA_FILE, SCHEMA_DIR, SCHEMA_ANY  # pylint: disable=global-statement
-        if SCHEMA_FILE is None:
+        if SCHEMA_FILE is None or SCHEMA_ANY is None or SCHEMA_DIR is None:
             get_schema("v1.0")
             SCHEMA_ANY = cast(Dict[Text, Any],
                               SCHEMA_CACHE["v1.0"][3].idx["https://w3id.org/cwl/salad#Any"])
@@ -370,9 +358,14 @@ class Process(object):
                                SCHEMA_CACHE["v1.0"][3].idx["https://w3id.org/cwl/cwl#File"])
             SCHEMA_DIR = cast(Dict[Text, Any],
                               SCHEMA_CACHE["v1.0"][3].idx["https://w3id.org/cwl/cwl#Directory"])
+            names = schema_salad.schema.make_avro_schema(
+                [SCHEMA_FILE, SCHEMA_DIR, SCHEMA_ANY],
+                schema_salad.ref_resolver.Loader({}))[0]
+        else:
+            names = schema_salad.schema.make_avro_schema(
+                [SCHEMA_FILE, SCHEMA_DIR, SCHEMA_ANY],
+                schema_salad.ref_resolver.Loader({}))[0]
 
-        names = schema_salad.schema.make_avro_schema([SCHEMA_FILE, SCHEMA_DIR, SCHEMA_ANY],
-                                                     schema_salad.ref_resolver.Loader({}))[0]
         if isinstance(names, avro.schema.SchemaParseException):
             raise names
         else:
@@ -380,7 +373,7 @@ class Process(object):
         self.tool = toolpath_object
         self.requirements = kwargs.get("requirements", []) + self.tool.get("requirements", [])
         self.hints = kwargs.get("hints", []) + self.tool.get("hints", [])
-        self.formatgraph = None  # type: Graph
+        self.formatgraph = None  # type: Optional[Graph]
         if "loader" in kwargs:
             self.formatgraph = kwargs["loader"].graph
 
@@ -462,10 +455,43 @@ class Process(object):
         stagedir: stagedir on host for this job
         select_resources: callback to select compute resources
         """
+        make_fs_access=kwargs.get("make_fs_access") or StdFsAccess
+        fs_access=make_fs_access(kwargs["basedir"])
 
-        builder = Builder()
-        builder.job = cast(Dict[Text, Union[Dict[Text, Any], List,
-                                            Text]], copy.deepcopy(joborder))
+        dockerReq, is_req = self.get_requirement("DockerRequirement")
+
+        if dockerReq and is_req and not kwargs.get("use_container"):
+            raise WorkflowException(
+                "Document has DockerRequirement under 'requirements' but use_container is false.  DockerRequirement must be under 'hints' or use_container must be true.")
+
+        if dockerReq and kwargs.get("use_container"):
+            outdir = fs_access.realpath(
+                dockerReq.get("dockerOutputDirectory") or
+                kwargs.get("docker_outdir") or "/var/spool/cwl")
+            tmpdir = fs_access.realpath(kwargs.get("docker_tmpdir") or "/tmp")
+            stagedir = fs_access.realpath(kwargs.get("docker_stagedir")
+                or "/var/lib/cwl")
+        else:
+            outdir = fs_access.realpath(kwargs.get("outdir")
+                or tempfile.mkdtemp())
+            tmpdir = fs_access.realpath(kwargs.get("tmpdir")
+                or tempfile.mkdtemp())
+            stagedir = fs_access.realpath(kwargs.get("stagedir")
+                or tempfile.mkdtemp())
+
+        builder = Builder(
+            names=self.names,
+            schemaDefs=self.schemaDefs,
+            files=[],
+            make_fs_access=make_fs_access,
+            fs_access=fs_access,
+            job=cast(Dict[Text, Union[Dict[Text, Any], List, Text]],
+                copy.deepcopy(joborder)),
+            requirements=self.requirements,
+            outdir=outdir,
+            tmpdir=tmpdir,
+            stagedir=stagedir,
+            resources={})
 
         # Validate job order
         try:
@@ -475,40 +501,17 @@ class Process(object):
         except (validate.ValidationException, WorkflowException) as e:
             raise WorkflowException("Invalid job input record:\n" + Text(e))
 
-        builder.files = []
-        builder.bindings = CommentedSeq()
-        builder.schemaDefs = self.schemaDefs
-        builder.names = self.names
-        builder.requirements = self.requirements
-        builder.hints = self.hints
-        builder.resources = {}
-        builder.timeout = kwargs.get("eval_timeout")
-        builder.debug = kwargs.get("debug")
-
-        dockerReq, is_req = self.get_requirement("DockerRequirement")
-
-        if dockerReq and is_req and not kwargs.get("use_container"):
-            raise WorkflowException(
-                "Document has DockerRequirement under 'requirements' but use_container is false.  DockerRequirement must be under 'hints' or use_container must be true.")
-
-        builder.make_fs_access = kwargs.get("make_fs_access") or StdFsAccess
-        builder.fs_access = builder.make_fs_access(kwargs["basedir"])
-
         loadListingReq, _ = self.get_requirement("LoadListingRequirement")
         if loadListingReq:
             builder.loadListing = loadListingReq.get("loadListing")
 
-        if dockerReq and kwargs.get("use_container"):
-            builder.outdir = builder.fs_access.realpath(
-                dockerReq.get("dockerOutputDirectory") or kwargs.get("docker_outdir") or "/var/spool/cwl")
-            builder.tmpdir = builder.fs_access.realpath(kwargs.get("docker_tmpdir") or "/tmp")
-            builder.stagedir = builder.fs_access.realpath(kwargs.get("docker_stagedir") or "/var/lib/cwl")
-        else:
-            builder.outdir = builder.fs_access.realpath(kwargs.get("outdir") or tempfile.mkdtemp())
-            builder.tmpdir = builder.fs_access.realpath(kwargs.get("tmpdir") or tempfile.mkdtemp())
-            builder.stagedir = builder.fs_access.realpath(kwargs.get("stagedir") or tempfile.mkdtemp())
+        builder.bindings = CommentedSeq()
+        builder.hints = self.hints
+        builder.timeout = kwargs.get("eval_timeout")
+        builder.debug = kwargs.get("debug")
 
-        if self.formatgraph:
+
+        if self.formatgraph is not None:
             for i in self.tool["inputs"]:
                 d = shortname(i["id"])
                 if d in builder.job and i.get("format"):
@@ -590,7 +593,8 @@ class Process(object):
                 request[a + "Max"] = mx
 
         if kwargs.get("select_resources"):
-            return kwargs["select_resources"](request)
+            return cast(Dict[Text, Union[int, Text]],
+                kwargs["select_resources"](request))
         else:
             return {
                 "cores": request["coresMin"],
@@ -613,7 +617,9 @@ class Process(object):
                 else:
                     _logger.info(sl.makeError(u"Unknown hint %s" % (r["class"])))
 
-    def get_requirement(self, feature):  # type: (Any) -> Tuple[Any, bool]
+    def get_requirement(self,
+                        feature  # type: Any
+                        ):  # type: (...) -> Tuple[Any, Optional[bool]]
         return get_feature(self, feature)
 
     def visit(self, op):  # type: (Callable[[Dict[Text, Any]], None]) -> None
@@ -626,7 +632,7 @@ class Process(object):
             **kwargs  # type: Any
             ):
         # type: (...) -> Generator[Any, None, None]
-        return None
+        pass
 
 
 def empty_subtree(dirpath):  # type: (Text) -> bool
@@ -701,7 +707,7 @@ def mergedirs(listing):
 def scandeps(base, doc, reffields, urlfields, loadref, urljoin=urlparse.urljoin):
     # type: (Text, Any, Set[Text], Set[Text], Callable[[Text, Text], Any], Callable[[Text, Text], Text]) -> List[Dict[Text, Text]]
     r = []  # type: List[Dict[Text, Text]]
-    deps = None  # type: Dict[Text, Any]
+    deps = None  # type: Optional[Dict[Text, Any]]
     if isinstance(doc, dict):
         if "id" in doc:
             if doc["id"].startswith("file://"):
@@ -745,7 +751,7 @@ def scandeps(base, doc, reffields, urlfields, loadref, urljoin=urlparse.urljoin)
                             "location": subid
                         }
                         sf = scandeps(subid, sub, reffields, urlfields, loadref, urljoin=urljoin)
-                        if sf:
+                        if sf is not None:
                             deps["secondaryFiles"] = sf
                         deps = nestdir(base, deps)
                         r.append(deps)
@@ -763,17 +769,19 @@ def scandeps(base, doc, reffields, urlfields, loadref, urljoin=urlparse.urljoin)
         for d in doc:
             r.extend(scandeps(base, d, reffields, urlfields, loadref, urljoin=urljoin))
 
-    if r:
+    if r is not None:
         normalizeFilesDirs(r)
         r = mergedirs(r)
 
     return r
 
 
-def compute_checksums(fs_access, fileobj):
+def compute_checksums(fs_access,  # type: StdFsAccess
+                      fileobj     # type: Dict[Text, Union[Text, int]]
+                      ):  # type: (...) -> None
     if "checksum" not in fileobj:
         checksum = hashlib.sha1()
-        with fs_access.open(fileobj["location"], "rb") as f:
+        with fs_access.open(Text(fileobj["location"]), "rb") as f:
             contents = f.read(1024 * 1024)
             while contents != "":
                 checksum.update(contents)

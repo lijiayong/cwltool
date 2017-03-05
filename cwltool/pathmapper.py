@@ -8,7 +8,7 @@ from functools import partial
 import schema_salad.validate as validate
 from schema_salad.ref_resolver import uri_file_path
 from schema_salad.sourceline import SourceLine
-from typing import Any, Callable, Set, Text, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Text, Tuple, Union
 from six.moves import urllib
 
 from .stdfsaccess import abspath, StdFsAccess
@@ -60,7 +60,7 @@ def adjustDirObjs(rec, op):
 
 def normalizeFilesDirs(job):
     # type: (Union[List[Dict[Text, Any]], Dict[Text, Any]]) -> None
-    def addLocation(d):
+    def addLocation(d):  # type: (Dict[Text, Any]) -> None
         if "location" not in d:
             if d["class"] == "File" and ("contents" not in d):
                 raise validate.ValidationException("Anonymous file object must have 'contents' and 'basename' fields.")
@@ -84,7 +84,7 @@ def normalizeFilesDirs(job):
 def dedup(listing):  # type: (List[Any]) -> List[Any]
     marksub = set()
 
-    def mark(d):
+    def mark(d):  # type: (Dict[Text, Any]) -> None
         marksub.add(d["location"])
 
     for l in listing:
@@ -122,7 +122,7 @@ def get_listing(fs_access, rec, recursive=True):
             listing.append({"class": "File", "location": ld, "basename": bn})
     rec["listing"] = listing
 
-def trim_listing(obj):
+def trim_listing(obj):  # type: (Dict[Text, Any]) -> None
     """Remove 'listing' field from Directory objects that are file references.
 
     It redundant and potentially expensive to pass fully enumerated Directory
@@ -238,7 +238,9 @@ class PathMapper(object):
     def items(self):  # type: () -> List[Tuple[Text, MapperEnt]]
         return self._pathmap.items()
 
-    def reversemap(self, target):  # type: (Text) -> Tuple[Text, Text]
+    def reversemap(self,
+                   target  # type: Text
+                   ):  # type: (...) -> Optional[Tuple[Text, Text]]
         for k, v in self._pathmap.items():
             if v[1] == target:
                 return (k, v[0])

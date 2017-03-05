@@ -8,7 +8,8 @@ from collections import namedtuple
 
 import schema_salad.validate as validate
 from schema_salad.sourceline import SourceLine
-from typing import Any, Callable, cast, Generator, Iterable, List, Text, Union
+from typing import (cast, Any, Callable, Dict, Generator, Iterable, List,
+        Optional, Text, Union)
 
 from . import draft2tool
 from . import expression
@@ -57,8 +58,14 @@ def findfiles(wo, fn=None):  # type: (Any, List) -> List[Dict[Text, Any]]
     return fn
 
 
-def match_types(sinktype, src, iid, inputobj, linkMerge, valueFrom):
-    # type: (Union[List[Text],Text], WorkflowStateItem, Text, Dict[Text, Any], Text, Text) -> bool
+def match_types(sinktype,   # type: Union[List[Text],Text]
+                src,        # type: WorkflowStateItem
+                iid,        # type: Text
+                inputobj,   # type: Dict[Text, Any]
+                linkMerge,  # type: Text
+                valueFrom   # type: Text
+                ):
+    # type: (...) -> bool
     if isinstance(sinktype, list):
         # Sink is union type
         for st in sinktype:
@@ -73,7 +80,7 @@ def match_types(sinktype, src, iid, inputobj, linkMerge, valueFrom):
             if not match_types(st, srccopy, iid, inputobj, linkMerge, valueFrom):
                 return False
         return True
-    elif linkMerge:
+    elif linkMerge is not None:
         if iid not in inputobj:
             inputobj[iid] = []
         if linkMerge == "merge_nested":
@@ -112,7 +119,7 @@ def can_assign_src_to_sink(src, sink):  # type: (Any, Any) -> bool
             if can_assign_src_to_sink(src, t):
                 return True
     else:
-        return src == sink
+        return cast(bool, src == sink)
     return False
 
 
@@ -145,8 +152,14 @@ def _compare_records(src, sink):
     return True
 
 
-def object_from_state(state, parms, frag_only, supportsMultipleInput, sourceField, incomplete=False):
-    # type: (Dict[Text, WorkflowStateItem], List[Dict[Text, Any]], bool, bool, Text, bool) -> Dict[Text, Any]
+def object_from_state(state,                  # type: Dict[Text, Optional[WorkflowStateItem]]
+                      parms,                  # type: List[Dict[Text, Any]]
+                      frag_only,              # type: bool
+                      supportsMultipleInput,  # type: bool
+                      sourceField,            # type: Text
+                      incomplete=False        # type: bool
+                      ):
+    # type: (...) -> Optional[Dict[Text, Any]]
     inputobj = {}  # type: Dict[Text, Any]
     for inp in parms:
         iid = inp["id"]
@@ -161,16 +174,17 @@ def object_from_state(state, parms, frag_only, supportsMultipleInput, sourceFiel
                     "declared.")
             connections = aslist(inp[sourceField])
             for src in connections:
-                if src in state and state[src] is not None and (state[src].success == "success" or incomplete):
+                if src in state and state[src] is not None and (state[src].success == "success" or incomplete):  # type: ignore
+                    item=cast(WorkflowStateItem, state[src])
                     if not match_types(
-                            inp["type"], state[src], iid, inputobj,
+                            inp["type"], item, iid, inputobj,
                             inp.get("linkMerge", ("merge_nested"
                                                   if len(connections) > 1 else None)),
                             valueFrom=inp.get("valueFrom")):
                         raise WorkflowException(
                             u"Type mismatch between source '%s' (%s) and "
                             "sink '%s' (%s)" % (src,
-                                                state[src].parameter["type"], inp["id"],
+                                                item.parameter["type"], inp["id"],
                                                 inp["type"]))
                 elif src not in state:
                     raise WorkflowException(
@@ -194,7 +208,7 @@ class WorkflowJobStep(object):
         self.id = step.id
         self.submitted = False
         self.completed = False
-        self.iterable = None  # type: Iterable
+        self.iterable = None  # type: Optional[Iterable]
         self.name = uniquename(u"step %s" % shortname(self.id))
 
     def job(self, joborder, output_callback, **kwargs):
@@ -211,8 +225,8 @@ class WorkflowJob(object):
         self.workflow = workflow
         self.tool = workflow.tool
         self.steps = [WorkflowJobStep(s) for s in workflow.steps]
-        self.state = None  # type: Dict[Text, WorkflowStateItem]
-        self.processStatus = None  # type: Text
+        self.state = {}  # type: Dict[Text, Optional[WorkflowStateItem]]
+        self.processStatus = None  # type: Optional[Text]
         if "outdir" in kwargs:
             self.outdir = kwargs["outdir"]
         elif "tmp_outdir_prefix" in kwargs:
@@ -226,19 +240,26 @@ class WorkflowJob(object):
         _logger.debug(u"[%s] initialized from %s", self.name,
                       self.tool.get("id", "workflow embedded in %s" % kwargs.get("part_of")))
 
-    def receive_output(self, step, outputparms, jobout, processStatus):
-        # type: (WorkflowJobStep, List[Dict[Text,Text]], Dict[Text,Text], Text) -> None
+    def receive_output(self,
+                       step,          # type: WorkflowJobStep
+                       outputparms,   # List[Dict[Text,Text]]
+                       jobout,        # Dict[Text, Text]
+                       processStatus  # type: Text
+                       ):  # type: (...) -> None
 
         for i in outputparms:
             if "id" in i:
                 if i["id"] in jobout:
-                    self.state[i["id"]] = WorkflowStateItem(i, jobout[i["id"]], processStatus)
+                    self.state[i["id"]] = WorkflowStateItem(
+                        i, jobout[i["id"]], processStatus)
                 else:
-                    _logger.error(u"[%s] Output is missing expected field %s", step.name, i["id"])
+                    _logger.error(u"[%s] Output is missing expected field %s",
+                         step.name, i["id"])
                     processStatus = "permanentFail"
 
         if _logger.isEnabledFor(logging.DEBUG):
-            _logger.debug(u"[%s] produced output %s", step.name, json.dumps(jobout, indent=4))
+            _logger.debug(u"[%s] produced output %s", step.name,
+                json.dumps(jobout, indent=4))
 
         if processStatus != "success":
             if self.processStatus != "permanentFail":
@@ -344,7 +365,7 @@ class WorkflowJob(object):
             self.processStatus = "permanentFail"
             step.completed = True
 
-    def run(self, **kwargs):
+    def run(self, **kwargs):  # type: (**Any) -> None
         _logger.debug(u"[%s] workflow starting", self.name)
 
     def job(self, joborder, output_callback, **kwargs):
@@ -386,7 +407,7 @@ class WorkflowJob(object):
                         _logger.debug("", exc_info=True)
                         self.processStatus = "permanentFail"
 
-                if step.iterable:
+                if step.iterable is not None:
                     try:
                         for newjob in step.iterable:
                             if kwargs.get("on_error", "stop") == "stop" and self.processStatus != "success":
@@ -453,7 +474,7 @@ class Workflow(Process):
         for w in wj.job(builder.job, output_callbacks, **kwargs):
             yield w
 
-    def visit(self, op):
+    def visit(self, op):  # type: (Callable[[Dict[Text, Any]], Any]) -> None
         op(self.tool)
         for s in self.steps:
             s.visit(op)
@@ -593,7 +614,7 @@ class WorkflowStep(Process):
             _logger.exception("Unexpected exception")
             raise WorkflowException(Text(e))
 
-    def visit(self, op):
+    def visit(self, op):  # type: (Callable[[Dict[Text, Any]], Any]) -> None
         self.embedded_tool.visit(op)
 
 
@@ -603,7 +624,7 @@ class ReceiveScatterOutput(object):
         self.dest = dest
         self.completed = 0
         self.processStatus = u"success"
-        self.total = None  # type: int
+        self.total = 0
         self.output_callback = output_callback
 
     def receive_scatter_output(self, index, jobout, processStatus):
@@ -626,7 +647,10 @@ class ReceiveScatterOutput(object):
             self.output_callback(self.dest, self.processStatus)
 
 
-def parallel_steps(steps, rc, kwargs):  # type: (List[Generator], ReceiveScatterOutput, Dict[str, Any]) -> Generator
+def parallel_steps(steps,  # List[Generator]
+                   rc,     # ReceiveScatterOutput
+                   kwargs  # type: Dict[str, Any]
+                   ):  # type: (...) -> Generator
     while rc.completed < rc.total:
         made_progress = False
         for index in xrange(len(steps)):
@@ -650,18 +674,24 @@ def parallel_steps(steps, rc, kwargs):  # type: (List[Generator], ReceiveScatter
             yield None
 
 
-def dotproduct_scatter(process, joborder, scatter_keys, output_callback, **kwargs):
-    # type: (WorkflowJobStep, Dict[Text, Any], List[Text], Callable[..., Any], **Any) -> Generator
-    l = None
+def dotproduct_scatter(process,          # type: WorkflowJobStep
+                       joborder,         # type: Dict[Text, Any]
+                       scatter_keys,     # type: List[Text]
+                       output_callback,  # type: Callable[..., Any]
+                       **kwargs          # type: Any
+                       ):  # type: (...) -> Generator
+    l = 0
     for s in scatter_keys:
-        if l is None:
+        if l is 0:
             l = len(joborder[s])
         elif l != len(joborder[s]):
-            raise WorkflowException("Length of input arrays must be equal when performing dotproduct scatter.")
+            raise WorkflowException(
+                "Length of input arrays must be equal when performing "
+                "dotproduct scatter.")
 
-    output = {}  # type: Dict[Text,List[Text]]
+    output = {}  # type: Dict[Text, List[Text]]
     for i in process.tool["outputs"]:
-        output[i["id"]] = [None] * l
+        output[i["id"]] = [u""] * l
 
     rc = ReceiveScatterOutput(output_callback, output)
 
@@ -680,13 +710,17 @@ def dotproduct_scatter(process, joborder, scatter_keys, output_callback, **kwarg
     return parallel_steps(steps, rc, kwargs)
 
 
-def nested_crossproduct_scatter(process, joborder, scatter_keys, output_callback, **kwargs):
-    # type: (WorkflowJobStep, Dict[Text, Any], List[Text], Callable[..., Any], **Any) -> Generator
+def nested_crossproduct_scatter(process,          # type: WorkflowJobStep
+                                joborder,         # type: Dict[Text, Any]
+                                scatter_keys,     # type: List[Text]
+                                output_callback,  # type: Callable[..., Any]
+                                **kwargs          # type: Any
+                                ):  # type: (...) -> Generator
     scatter_key = scatter_keys[0]
     l = len(joborder[scatter_key])
-    output = {}  # type: Dict[Text,List[Text]]
+    output = {}  # type: Dict[Text, List[Text]]
     for i in process.tool["outputs"]:
-        output[i["id"]] = [None] * l
+        output[i["id"]] = [u""] * l
 
     rc = ReceiveScatterOutput(output_callback, output)
 
@@ -724,16 +758,21 @@ def crossproduct_size(joborder, scatter_keys):
     return sum
 
 
-def flat_crossproduct_scatter(process, joborder, scatter_keys, output_callback, startindex, **kwargs):
-    # type: (WorkflowJobStep, Dict[Text, Any], List[Text], Union[ReceiveScatterOutput,Callable[..., Any]], int, **Any) -> Union[List[Generator], Generator]
+def flat_crossproduct_scatter(process,          # type: WorkflowJobStep
+                              joborder,         # type: Dict[Text, Any]
+                              scatter_keys,     # type: List[Text]
+                              output_callback,  # type: Union[ReceiveScatterOutput, Callable[..., Any]]
+                              startindex,       # type: int
+                              **kwargs          # type: Any
+                              ):
+    # type: (...) -> Union[List[Generator], Generator]
     scatter_key = scatter_keys[0]
     l = len(joborder[scatter_key])
-    rc = None  # type: ReceiveScatterOutput
 
     if startindex == 0 and not isinstance(output_callback, ReceiveScatterOutput):
         output = {}  # type: Dict[Text,List[Text]]
         for i in process.tool["outputs"]:
-            output[i["id"]] = [None] * crossproduct_size(joborder, scatter_keys)
+            output[i["id"]] = [u""] * crossproduct_size(joborder, scatter_keys)
         rc = ReceiveScatterOutput(output_callback, output)
     elif isinstance(output_callback, ReceiveScatterOutput):
         rc = output_callback

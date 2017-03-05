@@ -3,7 +3,7 @@ import json
 import logging
 import re
 
-from typing import Any, AnyStr, Union, Text, Dict, List
+from typing import cast, Any, AnyStr, Dict, List, Optional, Text, Union
 from six import u
 
 from . import sandboxjs
@@ -32,7 +32,7 @@ class SubstitutionError(Exception):
     pass
 
 
-def scanner(scan):  # type: (Text) -> List[int]
+def scanner(scan):  # type: (Text) -> Optional[List[int]]
     DEFAULT = 0
     DOLLAR = 1
     PAREN = 2
@@ -108,15 +108,14 @@ def scanner(scan):  # type: (Text) -> List[int]
 
 
 def next_seg(remain, obj):  # type: (Text, Any) -> Any
-    if remain:
+    if remain is not None:
         m = segment_re.match(remain)
-        key = None  # type: Union[str, int]
         if m.group(0)[0] == '.':
             key = m.group(0)[1:]
         elif m.group(0)[1] in ("'", '"'):
             key = m.group(0)[2:-2].replace("\\'", "'").replace('\\"', '"')
 
-        if key:
+        if key is not None:
             if isinstance(obj, list) and key == "length" and not remain[m.end(0):]:
                 return len(obj)
             if not isinstance(obj, dict):
@@ -141,14 +140,15 @@ def next_seg(remain, obj):  # type: (Text, Any) -> Any
 
 
 def evaluator(ex, jslib, obj, fullJS=False, timeout=None, debug=False):
-    # type: (Text, Text, Dict[Text, Any], bool, int, bool) -> JSON
+    # type: (Text, Text, Dict[Text, Any], Optional[bool], int, bool) -> JSON
     m = param_re.match(ex)
-    if m:
+    if m is not None:
         try:
-            return next_seg(m.group(0)[m.end(1) - m.start(0):-1], obj[m.group(1)])
+            return cast(JSON, next_seg(
+                m.group(0)[m.end(1) - m.start(0):-1], obj[m.group(1)]))
         except Exception as w:
             raise WorkflowException("%s%s" % (m.group(1), w))
-    elif fullJS:
+    elif fullJS is True:
         return sandboxjs.execjs(ex, jslib, timeout=timeout, debug=debug)
     else:
         raise sandboxjs.JavascriptException(
@@ -162,7 +162,7 @@ def interpolate(scan, rootvars,
     scan = scan.strip()
     parts = []
     w = scanner(scan)
-    while w:
+    while w is not None:
         parts.append(scan[0:w[0]])
 
         if scan[w[0]] == '$':
@@ -184,11 +184,20 @@ def interpolate(scan, rootvars,
     return ''.join(parts)
 
 
-def do_eval(ex, jobinput, requirements, outdir, tmpdir, resources,
-            context=None, pull_image=True, timeout=None, debug=False):
-    # type: (Union[dict, AnyStr], Dict[Text, Union[Dict, List, Text]], List[Dict[Text, Any]], Text, Text, Dict[Text, Union[int, Text]], Any, bool, int, bool) -> Any
+def do_eval(ex,               # type: Union[dict, AnyStr]
+            jobinput,         # type: Dict[Text, Union[Dict, List, Text]]
+            requirements,     # type: List[Dict[Text, Any]]
+            outdir,           # type: Optional[Text]
+            tmpdir,           # type: Optional[Text]
+            resources,        # type: Dict[Text, Union[int, Text]]
+            context=None,     # type: Any
+            pull_image=True,  # type: bool
+            timeout=None,     # type: int
+            debug=False       # type: bool
+            ):
+    # type: (...) -> Any
 
-    runtime = copy.copy(resources)
+    runtime = cast(Dict[Text, Union[int, Text, None]], copy.copy(resources))
     runtime["tmpdir"] = tmpdir
     runtime["outdir"] = outdir
 

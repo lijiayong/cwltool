@@ -10,8 +10,8 @@ import sys
 import tempfile
 
 import shellescape
-from typing import (Any, Callable, Union, Iterable, MutableMapping,
-                    IO, Text, Tuple)
+from typing import (Any, Callable, Dict, IO, Iterable, List, Optional,
+    MutableMapping, Text, Tuple, Union)
 
 from . import docker
 from .builder import Builder
@@ -91,27 +91,37 @@ def deref_links(outputs):  # type: (Any) -> None
 
 
 class CommandLineJob(object):
-    def __init__(self):  # type: () -> None
-        self.builder = None  # type: Builder
-        self.joborder = None  # type: Dict[Text, Union[Dict[Text, Any], List, Text]]
-        self.stdin = None  # type: Text
-        self.stderr = None  # type: Text
-        self.stdout = None  # type: Text
-        self.successCodes = None  # type: Iterable[int]
-        self.temporaryFailCodes = None  # type: Iterable[int]
-        self.permanentFailCodes = None  # type: Iterable[int]
-        self.requirements = None  # type: List[Dict[Text, Text]]
-        self.hints = None  # type: Dict[Text,Text]
-        self.name = None  # type: Text
-        self.command_line = None  # type: List[Text]
-        self.pathmapper = None  # type: PathMapper
-        self.collect_outputs = None  # type: Union[Callable[[Any], Any], functools.partial[Any]]
-        self.output_callback = None  # type: Callable[[Any, Any], Any]
-        self.outdir = None  # type: Text
-        self.tmpdir = None  # type: Text
-        self.environment = None  # type: MutableMapping[Text, Text]
-        self.generatefiles = None  # type: Dict[Text, Union[List[Dict[Text, Text]], Dict[Text, Text], Text]]
-        self.stagedir = None  # type: Text
+    def __init__(self,
+                 outdir,         # type: str
+                 tmpdir,         # type: str
+                 stagedir,       # type: Text
+                 pathmapper,     # type: PathMapper
+                 builder,        # type: Builder
+                 environment,    # type: MutableMapping[str, str]
+                 generatefiles,  # type: Dict[Text, Union[List[Dict[Text, Text]], Dict[Text, Text], Text]]
+                 collect_outputs,  # type: Union[Callable[[Any], Any], functools.partial[Any]]
+                 output_callback,  # type: Callable[[Any, Any], Any]
+                 ):  # type: (...) -> None
+        self.outdir = outdir
+        self.tmpdir = tmpdir
+        self.stagedir = stagedir
+        self.pathmapper = pathmapper
+        self.builder = builder
+        self.environment = environment
+        self.generatefiles = generatefiles
+        self.collect_outputs = collect_outputs
+        self.output_callback = output_callback
+        self.joborder = None  # type: Optional[Dict[Text, Union[Dict[Text, Any], List, Text]]]
+        self.stdin = None  # type: Optional[Text]
+        self.stderr = None  # type: Optional[Text]
+        self.stdout = None  # type: Optional[Text]
+        self.successCodes = None  # type: Optional[Iterable[int]]
+        self.temporaryFailCodes = None  # type: Optional[Iterable[int]]
+        self.permanentFailCodes = None  # type: Optional[Iterable[int]]
+        self.requirements = None  # type: Optional[List[Dict[Text, Text]]]
+        self.hints = None  # type: Optional[Dict[Text,Text]]
+        self.name = None  # type: Optional[Text]
+        self.command_line = []  # type: List[Text]
 
     def run(self, dry_run=False, pull_image=True, rm_container=True,
             rm_tmpdir=True, move_outputs="move", **kwargs):
@@ -134,7 +144,7 @@ class CommandLineJob(object):
                     "file." % (knownfile, self.pathmapper.mapper(knownfile)[0]))
 
         img_id = None
-        env = None  # type: Union[MutableMapping[Text, Text], MutableMapping[str, str]]
+        env = {}  # type: MutableMapping[str, str]
         try:
             if docker_req and kwargs.get("use_container") is not False:
                 env = os.environ
@@ -147,12 +157,12 @@ class CommandLineJob(object):
                 raise Exception("Docker image not available")
         except Exception as e:
             _logger.debug("Docker error", exc_info=True)
-            if docker_is_req:
+            if docker_is_req is not None:
                 raise WorkflowException("Docker is required to run this tool: %s" % e)
             else:
                 raise WorkflowException("Docker is not available for this tool, try --no-container to disable Docker: %s" % e)
 
-        if img_id:
+        if img_id is not None:
             runtime = ["docker", "run", "-i"]
             for src, vol in self.pathmapper.items():
                 if not vol.staged:
@@ -174,7 +184,7 @@ class CommandLineJob(object):
             elif kwargs.get("disable_net", None):
                 runtime.append("--net=none")
 
-            if self.stdout:
+            if self.stdout is not None:
                 runtime.append("--log-driver=none")
 
             euid = docker_vm_uid() or os.geteuid()
@@ -214,10 +224,8 @@ class CommandLineJob(object):
 
         scr, _ = get_feature(self, "ShellCommandRequirement")
 
-        shouldquote = None  # type: Callable[[Any], Any]
-        if scr:
-            shouldquote = lambda x: False
-        else:
+        shouldquote = lambda x: False  # type: Callable[[Any], Any]
+        if scr is None:
             shouldquote = needs_shell_quoting_re.search
 
         _logger.info(u"[job %s] %s$ %s%s%s%s",
@@ -225,9 +233,11 @@ class CommandLineJob(object):
                      self.outdir,
                      " \\\n    ".join([shellescape.quote(Text(arg)) if shouldquote(Text(arg)) else Text(arg) for arg in
                                        (runtime + self.command_line)]),
-                     u' < %s' % self.stdin if self.stdin else '',
-                     u' > %s' % os.path.join(self.outdir, self.stdout) if self.stdout else '',
-                     u' 2> %s' % os.path.join(self.outdir, self.stderr) if self.stderr else '')
+                     u' < %s' % self.stdin if self.stdin is not None else '',
+                     u' > %s' % os.path.join(self.outdir, self.stdout)
+                     if self.stdout is not None else '',
+                     u' 2> %s' % os.path.join(self.outdir, self.stderr)
+                     if self.stderr is not None else '')
 
         if dry_run:
             return (self.outdir, {})
@@ -235,13 +245,13 @@ class CommandLineJob(object):
         outputs = {}  # type: Dict[Text,Text]
 
         try:
-            if self.generatefiles["listing"]:
+            if self.generatefiles["listing"] is not None:
                 generatemapper = PathMapper([self.generatefiles], self.outdir,
                                             self.outdir, separateDirs=False)
                 _logger.debug(u"[job %s] initial work dir %s", self.name,
                               json.dumps({p: generatemapper.mapper(p) for p in generatemapper.files()}, indent=4))
 
-                def linkoutdir(src, tgt):
+                def linkoutdir(src, tgt):  # type: (str, str) -> None
                     # Need to make the link to the staged file (may be inside
                     # the container)
                     for _, item in self.pathmapper.items():
@@ -252,26 +262,31 @@ class CommandLineJob(object):
                 stageFiles(generatemapper, linkoutdir)
 
             stdin_path = None
-            if self.stdin:
-                stdin_path = self.pathmapper.reversemap(self.stdin)[1]
+            if self.stdin is not None:
+                reverse_lookup = self.pathmapper.reversemap(self.stdin)
+                if reverse_lookup is not None:
+                    stdin_path = reverse_lookup[1]
+                else:
+                    raise Exception(
+                        "Target path for stdin missing from path mapper.")
 
             stderr_path = None
-            if self.stderr:
+            if self.stderr is not None:
                 abserr = os.path.join(self.outdir, self.stderr)
                 dnerr = os.path.dirname(abserr)
-                if dnerr and not os.path.exists(dnerr):
+                if dnerr is not None and not os.path.exists(dnerr):
                     os.makedirs(dnerr)
                 stderr_path = abserr
 
             stdout_path = None
-            if self.stdout:
+            if self.stdout is not None:
                 absout = os.path.join(self.outdir, self.stdout)
                 dn = os.path.dirname(absout)
-                if dn and not os.path.exists(dn):
+                if dn is not None and not os.path.exists(dn):
                     os.makedirs(dn)
                 stdout_path = absout
 
-            build_job_script = self.builder.build_job_script  # type: Callable[[List[str]], Text]
+            build_job_script = self.builder.build_job_script
             rcode = _job_popen(
                 [Text(x).encode('utf-8') for x in runtime + self.command_line],
                 stdin_path=stdin_path,
@@ -282,19 +297,19 @@ class CommandLineJob(object):
                 build_job_script=build_job_script,
             )
 
-            if self.successCodes and rcode in self.successCodes:
+            if self.successCodes is not None and rcode in self.successCodes:
                 processStatus = "success"
-            elif self.temporaryFailCodes and rcode in self.temporaryFailCodes:
+            elif self.temporaryFailCodes is not None and rcode in self.temporaryFailCodes:
                 processStatus = "temporaryFail"
-            elif self.permanentFailCodes and rcode in self.permanentFailCodes:
+            elif self.permanentFailCodes is not None and rcode in self.permanentFailCodes:
                 processStatus = "permanentFail"
             elif rcode == 0:
                 processStatus = "success"
             else:
                 processStatus = "permanentFail"
 
-            if self.generatefiles["listing"]:
-                def linkoutdir(src, tgt):
+            if self.generatefiles["listing"] is not None:
+                def linkoutdir(src, tgt):  # type: (str, str) -> None
                     # Need to make the link to the staged file (may be inside
                     # the container)
                     if os.path.islink(tgt):
@@ -307,7 +322,7 @@ class CommandLineJob(object):
 
         except OSError as e:
             if e.errno == 2:
-                if runtime:
+                if runtime is not None:
                     _logger.error(u"'%s' not found", runtime[0])
                 else:
                     _logger.error(u"'%s' not found", self.command_line[0])
@@ -331,7 +346,7 @@ class CommandLineJob(object):
 
         self.output_callback(outputs, processStatus)
 
-        if self.stagedir and os.path.exists(self.stagedir):
+        if self.stagedir is not None and os.path.exists(self.stagedir):
             _logger.debug(u"[job %s] Removing input staging directory %s", self.name, self.stagedir)
             shutil.rmtree(self.stagedir, True)
 
@@ -343,43 +358,38 @@ class CommandLineJob(object):
             _logger.debug(u"[job %s] Removing empty output directory %s", self.name, self.outdir)
             shutil.rmtree(self.outdir, True)
 
+        return None
 
 def _job_popen(
         commands,  # type: List[str]
-        stdin_path,  # type: Text
-        stdout_path,  # type: Text
-        stderr_path,  # type: Text
+        stdin_path,  # type: Optional[Text]
+        stdout_path,  # type: Optional[Text]
+        stderr_path,  # type: Optional[Text]
         env,  # type: Union[MutableMapping[Text, Text], MutableMapping[str, str]]
         cwd,  # type: Text
         job_dir=None,  # type: Text
-        build_job_script=None,  # type: Callable[[List[str]], Text]
+        build_job_script=None,  # type: Optional[Callable[[List[str]], Text]]
 ):
     # type: (...) -> int
 
-    job_script_contents = None  # type: Text
-    if build_job_script:
+    job_script_contents = None  # type: Optional[Text]
+    if build_job_script is not None:
         job_script_contents = build_job_script(commands)
 
     if not job_script_contents and not FORCE_SHELLED_POPEN:
 
-        stdin = None  # type: Union[IO[Any], int]
-        stderr = None  # type: IO[Any]
-        stdout = None  # type: IO[Any]
+        stdin = subprocess.PIPE  # type: Union[IO[Any], int]
+        stderr = sys.stderr  # type: IO[Any]
+        stdout = sys.stderr  # type: IO[Any]
 
         if stdin_path is not None:
             stdin = open(stdin_path, "rb")
-        else:
-            stdin = subprocess.PIPE
 
         if stdout_path is not None:
             stdout = open(stdout_path, "wb")
-        else:
-            stdout = sys.stderr
 
         if stderr_path is not None:
             stderr = open(stderr_path, "wb")
-        else:
-            stderr = sys.stderr
 
         sp = subprocess.Popen(commands,
                               shell=False,
@@ -390,7 +400,7 @@ def _job_popen(
                               env=env,
                               cwd=cwd)
 
-        if sp.stdin:
+        if sp.stdin is not None:
             sp.stdin.close()
 
         rcode = sp.wait()
@@ -442,7 +452,7 @@ def _job_popen(
                 stderr=subprocess.PIPE,
                 stdin=subprocess.PIPE,
             )
-            if sp.stdin:
+            if sp.stdin is not None:
                 sp.stdin.close()
 
             rcode = sp.wait()

@@ -13,7 +13,7 @@ from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from schema_salad.ref_resolver import Loader, Fetcher, file_uri
 from schema_salad.sourceline import cmap
 from schema_salad.validate import ValidationException
-from typing import Any, Callable, cast, Dict, Text, Tuple, Union
+from typing import cast, Any, Callable, Dict, List, Text, Tuple, Union
 from six.moves import urllib
 from six import itervalues, string_types
 
@@ -36,15 +36,14 @@ def fetch_document(argsworkflow,  # type: Union[Text, dict[Text, Any]]
     document_loader = Loader({"cwl": "https://w3id.org/cwl/cwl#", "id": "@id"},
                              fetcher_constructor=fetcher_constructor)
 
-    uri = None  # type: Text
-    workflowobj = None  # type: CommentedMap
+    #workflowobj = None  # type: Optional[CommentedMap]
     if isinstance(argsworkflow, string_types):
         split = urllib.parse.urlsplit(argsworkflow)
-        if split.scheme:
+        if split.scheme is not None:
             uri = argsworkflow
         elif os.path.exists(os.path.abspath(argsworkflow)):
             uri = file_uri(str(os.path.abspath(argsworkflow)))
-        elif resolver:
+        elif resolver is not None:
             uri = resolver(document_loader, argsworkflow)
 
         if uri is None:
@@ -255,4 +254,4 @@ def load_tool(argsworkflow,  # type: Union[Text, Dict[Text, Any]]
         document_loader, workflowobj, uri, enable_dev=enable_dev,
         strict=strict, fetcher_constructor=fetcher_constructor)
     return make_tool(document_loader, avsc_names, metadata, uri,
-                     makeTool, kwargs if kwargs else {})
+                     makeTool, kwargs if kwargs is not None else {})

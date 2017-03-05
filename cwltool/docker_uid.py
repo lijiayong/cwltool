@@ -1,10 +1,10 @@
 from __future__ import print_function
 import subprocess
 
-from typing import Text
+from typing import List, Optional, Text
 
 
-def docker_vm_uid():  # type: () -> int
+def docker_vm_uid():  # type: () -> Optional[int]
     """
     Returns the UID of the default docker user inside the VM
 
@@ -16,13 +16,13 @@ def docker_vm_uid():  # type: () -> int
     """
     if boot2docker_running():
         return boot2docker_uid()
-    elif docker_machine_running():
+    elif docker_machine_running() is True:
         return docker_machine_uid()
     else:
         return None
 
 
-def check_output_and_strip(cmd):  # type: (List[Text]) -> Text
+def check_output_and_strip(cmd):  # type: (List[Text]) -> Optional[Text]
     """
     Passes a command list to subprocess.check_output, returning None
     if an expected exception is raised
@@ -39,7 +39,7 @@ def check_output_and_strip(cmd):  # type: (List[Text]) -> Text
         return None
 
 
-def docker_machine_name():  # type: () -> Text
+def docker_machine_name():  # type: () -> Optional[Text]
     """
     Get the machine name of the active docker-machine machine
     :return: Name of the active machine or None if error
@@ -69,16 +69,20 @@ def boot2docker_running():  # type: () -> bool
     return cmd_output_matches(['boot2docker', 'status'], 'running')
 
 
-def docker_machine_running():  # type: () -> bool
+def docker_machine_running():  # type: () -> Optional[bool]
     """
     Asks docker-machine for active machine and checks if its VM is running
     :return: True if vm is running, False otherwise
     """
     machine_name = docker_machine_name()
-    return cmd_output_matches(['docker-machine', 'status', machine_name], 'Running')
+    if machine_name is not None:
+        return cmd_output_matches(
+            ['docker-machine', 'status', machine_name], 'Running')
+    else:
+        return None
 
 
-def cmd_output_to_int(cmd):  # type: (List[Text]) -> int
+def cmd_output_to_int(cmd):  # type: (List[Text]) -> Optional[int]
     """
     Runs the provided command and returns the integer value of the result
     :param cmd: The command to run
@@ -91,9 +95,11 @@ def cmd_output_to_int(cmd):  # type: (List[Text]) -> int
         except ValueError:
             # ValueError is raised if int conversion fails
             return None
+    else:
+        return None
 
 
-def boot2docker_uid():  # type: () -> int
+def boot2docker_uid():  # type: () -> Optional[int]
     """
     Gets the UID of the docker user inside a running boot2docker vm
     :return: the UID, or None if error (e.g. boot2docker not present or stopped)
@@ -101,14 +107,18 @@ def boot2docker_uid():  # type: () -> int
     return cmd_output_to_int(['boot2docker', 'ssh', 'id', '-u'])
 
 
-def docker_machine_uid():  # type: () -> int
+def docker_machine_uid():  # type: () -> Optional[int]
     """
     Asks docker-machine for active machine and gets the UID of the docker user
     inside the vm
     :return: the UID, or None if error (e.g. docker-machine not present or stopped)
     """
     machine_name = docker_machine_name()
-    return cmd_output_to_int(['docker-machine', 'ssh', machine_name, "id -u"])
+    if machine_name is not None:
+        return cmd_output_to_int(
+            ['docker-machine', 'ssh', machine_name, "id -u"])
+    else:
+        return None
 
 
 if __name__ == '__main__':
